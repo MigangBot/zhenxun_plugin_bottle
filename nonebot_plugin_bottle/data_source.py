@@ -1,4 +1,5 @@
 import re
+from httpx import AsyncClient
 from pathlib import Path
 from configs.config import Config
 from utils.http_utils import AsyncHttpx
@@ -19,8 +20,10 @@ def decode_message(text: str, bottle_id: int) -> Message:
         )
     return Message(text)
 
+
 async def encode_message(msg: Message, bottle_id) -> str:
     import os
+
     if isinstance(msg, str):
         return msg
     text = ""
@@ -32,6 +35,8 @@ async def encode_message(msg: Message, bottle_id) -> str:
             text += f"[__bottle_image:{count}__]"
             await AsyncHttpx.download_file(seg.data["url"], path / str(count))
             count += 1
+        elif seg.type == "at":
+            continue
         else:
             text += str(seg)
     if count == 0:
@@ -45,27 +50,30 @@ async def text_audit(text: str):
     `text`: 待审核文本
     """
     if (not Config.get_config(Path(__file__).parent.name, "API_KEY")) or (
-        Config.get_config(Path(__file__).parent.name, "SECRET_KEY")
+        not Config.get_config(Path(__file__).parent.name, "SECRET_KEY")
     ):
         # 未配置key 直接通过审核
         return "pass"
-    # access_token 获取
-    host = f'https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id={Config.get_config(Path(__file__).parent.name, "API_KEY")}&client_secret={Config.get_config(Path(__file__).parent.name, "SECRET_KEY")}'
-    response = await AsyncHttpx.get(host, timeout=5)
-    if response:
-        access_token = response.json()["access_token"]
-    else:
-        return True
-
-    request_url = (
-        "https://aip.baidubce.com/rest/2.0/solution/v1/text_censor/v2/user_defined"
-    )
-    params = {"text": text}
-    request_url = request_url + "?access_token=" + access_token
-    headers = {"content-type": "application/x-www-form-urlencoded"}
-    response = await AsyncHttpx.post(request_url, data=params, headers=headers)
-    if response:
-        return response.json()
-    else:
-        # 调用审核API失败
-        return "Error"
+    async with AsyncClient() as client:
+        response = await client.post(
+            "https://aip.baidubce.com/oauth/2.0/token",
+            data={
+                "grant_type": "client_credentials",
+                "client_id": Config.get_config(Path(__file__).parent.name, "API_KEY"),
+                "client_secret": Config.get_config(
+                    Path(__file__).parent.name, "SECRET_KEY"
+                ),
+            },
+        )
+        if response:
+            access_token = response.json()["access_token"]
+        else:
+            return "Error"
+        response = await client.post(
+            "https://aip.baidubce.com/rest/2.0/solution/v1/text_censor/v2/user_defined",
+            data={"text": text, "access_token": access_token},
+        )
+        if response:
+            return response.json()
+        else:
+            return "Error"
