@@ -95,7 +95,6 @@ class DriftBottle(db.Model):
             0 举报失败
             1 举报成功
             2 举报成功并且已经自动处理
-            3 已经删除
         """
         async with db.transaction():
             bottle = (
@@ -148,7 +147,9 @@ class DriftBottle(db.Model):
                 return False
             com_list = json.loads(bottle.comment)
             com_list.append(comment)
-            await bottle.update(comment=json.dumps(com_list)).apply()
+            await bottle.update(
+                comment=json.dumps(com_list, ensure_ascii=False)
+            ).apply()
         return True
 
     @classmethod

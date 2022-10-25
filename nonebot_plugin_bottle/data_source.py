@@ -17,6 +17,7 @@ def decode_message(text: str, bottle_id: int) -> Message:
         text = text.replace(
             f"[__bottle_image:{g.group(1)}__]",
             str(MessageSegment.image(path / g.group(1))),
+            1,
         )
     return Message(text)
 
