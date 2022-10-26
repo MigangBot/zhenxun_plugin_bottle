@@ -1,8 +1,9 @@
 import asyncio
 import random
+from typing import Tuple
 from nonebot import on_command
 from nonebot.permission import SUPERUSER
-from nonebot.params import CommandArg
+from nonebot.params import CommandArg, Command
 from nonebot.adapters.onebot.v11 import (
     Bot,
     MessageEvent,
@@ -31,8 +32,10 @@ usage：
     （Bot所在所有群互通）
     指令：
         扔漂流瓶 [文本/图片]
+        匿名扔漂流瓶 [文本/图片]
         捡漂流瓶
         评论漂流瓶 [漂流瓶编号] [文本]
+        匿名评论漂流瓶 [漂流瓶编号] [文本]
         举报漂流瓶 [漂流瓶编号]
         查看漂流瓶 [漂流瓶编号] (说明：仅被评论的漂流瓶才可以进行查看)
 """.strip()
@@ -40,8 +43,10 @@ __plugin_des__ = "各个群互通的漂流瓶"
 __plugin_version__ = 0.1
 __plugin_cmd__ = [
     "扔漂流瓶 [文本/图片]",
+    "匿名扔漂流瓶 [文本/图片]",
     "捡漂流瓶",
     "评论漂流瓶 [漂流瓶编号] [文本]",
+    "匿名评论漂流瓶 [漂流瓶编号] [文本]",
     "举报漂流瓶 [漂流瓶编号]",
     "查看漂流瓶 [漂流瓶编号]",
     "清空漂流瓶 [_superuser]",
@@ -63,10 +68,12 @@ __plugin_configs__ = {
     },
 }
 
-throw = on_command("扔漂流瓶", aliases={"丢漂流瓶"}, permission=GROUP, priority=13, block=True)
+throw = on_command(
+    "扔漂流瓶", aliases={"匿名扔漂流瓶"}, permission=GROUP, priority=13, block=True
+)
 get = on_command("捡漂流瓶", priority=100, block=True)
 report = on_command("举报漂流瓶", priority=100, block=True)
-comment = on_command("评论漂流瓶", priority=100, block=True)
+comment = on_command("评论漂流瓶", aliases={"匿名评论漂流瓶"}, priority=100, block=True)
 check_bottle = on_command("查看漂流瓶", priority=100, block=True)
 
 clear = on_command("清空漂流瓶", permission=SUPERUSER, priority=100, block=True)
@@ -74,7 +81,12 @@ remove = on_command("删除漂流瓶", permission=SUPERUSER, priority=100, block
 
 
 @throw.handle()
-async def _(bot: Bot, event: GroupMessageEvent, arg: Message = CommandArg()):
+async def _(
+    bot: Bot,
+    event: GroupMessageEvent,
+    cmd: Tuple[str, ...] = Command(),
+    arg: Message = CommandArg(),
+):
     message_text = arg.extract_plain_text()
     if not arg:
         await throw.finish("想说些什么话呢？在后边写上吧！")
@@ -101,6 +113,10 @@ async def _(bot: Bot, event: GroupMessageEvent, arg: Message = CommandArg()):
         )
         user_name = user_name.get("card") or user_name.get("nickname", "未知")
 
+    if cmd[0][:2] == "匿名":
+        group_name = "*" * len(group_name)
+        user_name = "*" * len(user_name)
+
     await DriftBottle.Add(
         user_id=event.user_id,
         group_id=event.group_id,
@@ -116,22 +132,11 @@ async def _():
     if not (bottle := await DriftBottle.Select()):
         await get.finish("好像一个瓶子也没有呢...要不要扔一个？")
     else:
-        try:
-            user_name = (
-                await GroupInfoUser.get_member_info(bottle.user_id, bottle.group_id)
-            ).user_name
-        except AttributeError:
-            user_name = bottle.user_name
-        try:
-            group_name = (await GroupInfo.get_group_info(bottle.group_id)).group_name
-        except AttributeError:
-            group_name = bottle.group_name
-
         comment_list = json.loads(bottle.comment)
         comment_list.reverse()
         comment = "\n".join(comment_list[:3])
         await get.finish(
-            f"【漂流瓶No.{bottle.bottle_id}|被捡到{bottle.picked}次】来自【{group_name}】的 {user_name} ！\n"
+            f"【漂流瓶No.{bottle.bottle_id}|被捡到{bottle.picked}次】来自【{bottle.group_name}】的 {bottle.user_name} ！\n"
             + decode_message(bottle.content, bottle.bottle_id)
             + (f"\n★评论共 {len(comment_list)} 条★\n{comment}")
         )
@@ -155,7 +160,12 @@ async def _(arg: Message = CommandArg()):
 
 
 @comment.handle()
-async def _(bot: Bot, event: GroupMessageEvent, arg: Message = CommandArg()):
+async def _(
+    bot: Bot,
+    event: GroupMessageEvent,
+    cmd: Tuple[str, ...] = Command(),
+    arg: Message = CommandArg(),
+):
     mes = (arg.extract_plain_text()).split(maxsplit=1)
     if not is_number(mes[0]):
         await check_bottle.finish(f"[{mes[0]}]不是一个有效的数字编号哦")
@@ -181,6 +191,8 @@ async def _(bot: Bot, event: GroupMessageEvent, arg: Message = CommandArg()):
             group_id=event.group_id, user_id=event.user_id
         )
         user_name = user_name.get("card") or user_name.get("nickname", "未知")
+    if cmd[0][:2] == "匿名":
+        user_name = "*" * len(user_name)
     commen = f"{user_name}：{mes[1]}"
     if not await DriftBottle.Comment(index, commen):
         await comment.finish("评论失败~漂流瓶不存在")
@@ -205,16 +217,6 @@ async def _(bot: Bot, event: MessageEvent, arg: Message = CommandArg()):
 
     if not (bottle := await DriftBottle.Check_bottle(index)):
         await check_bottle.finish("该漂流瓶不存在或已沉没~")
-    try:
-        user_name = (
-            await GroupInfoUser.get_member_info(bottle.user_id, bottle.group_id)
-        ).user_name
-    except AttributeError:
-        user_name = bottle.user_name
-    try:
-        group_name = (await GroupInfo.get_group_info(bottle.group_id)).group_name
-    except AttributeError:
-        group_name = bottle.group_name
     if (
         not (comment_list := await DriftBottle.Check_comment(index))
         and str(event.user_id) not in bot.config.superusers
@@ -223,7 +225,7 @@ async def _(bot: Bot, event: MessageEvent, arg: Message = CommandArg()):
     comment_list.reverse()
     comment = "\n".join(comment_list)
     await check_bottle.finish(
-        f"来自【{group_name}】的 {user_name} 的第{index}号漂流瓶【这个瓶子被捡到了{bottle.picked}次！】：\n"
+        f"来自【{bottle.group_name}】的 {bottle.user_name} 的第{index}号漂流瓶【这个瓶子被捡到了{bottle.picked}次！】：\n"
         + decode_message(bottle.content, bottle.bottle_id)
         + f"\n★评论共 {len(comment_list)} 条★\n{comment}"
     )
