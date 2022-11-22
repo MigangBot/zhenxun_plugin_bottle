@@ -184,7 +184,7 @@ async def _(
             await throw.finish("文字审核未通过！原因：" + audit["data"][0]["msg"])
     try:
         user_name = (
-            await GroupInfoUser.get_member_info(bottle.user_id, bottle.group_id)
+            await GroupInfoUser.get_member_info(event.user_id, event.group_id)
         ).user_name
     except AttributeError:
         user_name = await bot.get_group_member_info(
